@@ -28,6 +28,24 @@ struct SessionState {
     web_to_pty_tx: Arc<RwLock<Option<mpsc::Sender<Vec<u8>>>>>,
     // Terminal history buffer
     history: Arc<RwLock<Vec<u8>>>,
+    // Connected users tracking - using DashMap for concurrent access
+    connected_users: Arc<DashMap<String, ConnectedUser>>,
+}
+
+#[derive(Clone)]
+struct ConnectedUser {
+    user_type: String,
+    user_id: String,
+    connected_at: String,
+    #[allow(dead_code)]
+    last_heartbeat: std::sync::Arc<std::sync::RwLock<chrono::DateTime<chrono::Utc>>>,
+}
+
+#[derive(Serialize)]
+struct ConnectedUserResponse {
+    user_type: String,
+    user_id: String,
+    connected_at: String,
 }
 
 #[derive(Clone)]
@@ -114,6 +132,11 @@ async fn main() -> Result<()> {
     let app = Router::new()
         .route("/api/session", post(create_session))
         .route("/api/session/{id}", get(get_session))
+        .route("/api/session/{id}/users", get(get_connected_users))
+        .route(
+            "/api/session/{id}/heartbeat/{user_id}",
+            post(update_heartbeat),
+        )
         .route("/ws/pty/{id}", get(handle_pty_ws))
         .route("/ws/web/{id}", get(handle_web_ws))
         .with_state(app_state);
@@ -176,6 +199,7 @@ async fn create_session(
     let (pty_broadcast, _) = broadcast::channel(1024);
     let web_to_pty_tx = Arc::new(RwLock::new(None));
     let history = Arc::new(RwLock::new(Vec::new()));
+    let connected_users = Arc::new(DashMap::new());
 
     let session = SessionState {
         session_id: session_id.clone(),
@@ -185,6 +209,7 @@ async fn create_session(
         pty_broadcast,
         web_to_pty_tx,
         history,
+        connected_users,
     };
 
     state.sessions.insert(session_id.clone(), session);
@@ -218,6 +243,70 @@ async fn get_session(
 
     info!("Retrieved session details for: {}", session_id);
     Ok(Json(details))
+}
+
+async fn get_connected_users(
+    State(state): State<AppState>,
+    Path(session_id): Path<String>,
+) -> Result<Json<Vec<ConnectedUserResponse>>, StatusCode> {
+    info!("Getting connected users for session: {}", session_id);
+
+    let session = state.sessions.get(&session_id).ok_or_else(|| {
+        warn!("Session not found: {}", session_id);
+        StatusCode::NOT_FOUND
+    })?;
+
+    // Clean up stale users first (older than 10 seconds)
+    cleanup_stale_users(&session);
+
+    let users: Vec<ConnectedUserResponse> = session
+        .connected_users
+        .iter()
+        .map(|entry| {
+            let user = entry.value();
+            ConnectedUserResponse {
+                user_type: user.user_type.clone(),
+                user_id: user.user_id.clone(),
+                connected_at: user.connected_at.clone(),
+            }
+        })
+        .collect();
+
+    info!(
+        "Retrieved {} connected users for session: {}",
+        users.len(),
+        session_id
+    );
+    Ok(Json(users))
+}
+
+fn cleanup_stale_users(session: &SessionState) {
+    let now = chrono::Utc::now();
+    let timeout_duration = chrono::Duration::seconds(10);
+
+    session.connected_users.retain(|_user_id, user| {
+        let last_heartbeat = user.last_heartbeat.read().unwrap();
+        let age = now.signed_duration_since(*last_heartbeat);
+        age < timeout_duration
+    });
+}
+
+async fn update_heartbeat(
+    State(state): State<AppState>,
+    Path((session_id, user_id)): Path<(String, String)>,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    let session = state.sessions.get(&session_id).ok_or_else(|| {
+        warn!("Session not found: {}", session_id);
+        StatusCode::NOT_FOUND
+    })?;
+
+    if let Some(user) = session.connected_users.get(&user_id) {
+        let mut last_heartbeat = user.last_heartbeat.write().unwrap();
+        *last_heartbeat = chrono::Utc::now();
+        Ok(Json(serde_json::json!({"success": true})))
+    } else {
+        Err(StatusCode::NOT_FOUND)
+    }
 }
 
 async fn handle_pty_ws(
@@ -388,12 +477,49 @@ async fn handle_web_websocket(socket: WebSocket, session: SessionState, user_typ
         _ => true,                            // Default to readonly for unknown user types
     };
 
+    // Generate unique user ID and add to connected users
+    let user_id = Uuid::new_v4().to_string();
+    let connected_at = chrono::Utc::now()
+        .format("%Y-%m-%d %H:%M:%S UTC")
+        .to_string();
+
+    let connected_user = ConnectedUser {
+        user_type: user_type.clone(),
+        user_id: user_id.clone(),
+        connected_at,
+        last_heartbeat: std::sync::Arc::new(std::sync::RwLock::new(chrono::Utc::now())),
+    };
+
+    // Add user to connected list
+    session
+        .connected_users
+        .insert(user_id.clone(), connected_user);
+
     info!(
-        "Web WebSocket connected for session: {} (user_type: {}, readonly: {})",
-        session_id, user_type, is_readonly
+        "Web WebSocket connected for session: {} (user_type: {}, user_id: {}, readonly: {})",
+        session_id, user_type, user_id, is_readonly
     );
 
-    // Send history to new web client first
+    // Send user_id to client as first message
+    let user_id_msg = serde_json::json!({
+        "type": "user_id",
+        "user_id": user_id
+    })
+    .to_string();
+
+    if ws_sender
+        .send(Message::Text(user_id_msg.into()))
+        .await
+        .is_err()
+    {
+        warn!(
+            "Failed to send user_id to web client for session: {}",
+            session_id
+        );
+        return;
+    }
+
+    // Send history to new web client
     let history_data = {
         let history_guard = session.history.read().await;
         history_guard.clone()
@@ -542,5 +668,11 @@ async fn handle_web_websocket(socket: WebSocket, session: SessionState, user_typ
         _ = forward_web_to_pty => {},
     }
 
-    info!("Web WebSocket disconnected for session: {}", session_id);
+    // Remove user from connected list on disconnection
+    session.connected_users.remove(&user_id);
+
+    info!(
+        "Web WebSocket disconnected for session: {} (user_id: {})",
+        session_id, user_id
+    );
 }

@@ -42,22 +42,53 @@
         <div id="terminal-container"
              class="{{ terminal_display }} min-h-screen bg-gray-900 text-white">
             <div class="p-6">
-                <div class="mb-6 flex justify-between items-center bg-gray-800 rounded-lg p-4 shadow-lg">
-                    <div>
-                        <h1 class="text-2xl font-bold bg-gradient-to-r from-green-400 to-blue-500 bg-clip-text text-transparent">
-                            Terminal Session
-                        </h1>
-                        <p class="text-sm text-gray-400 mt-1">Session ID: {{ session_id }}</p>
-                        <div class="flex items-center gap-3 mt-2">
-                            <div class="text-xs px-2 py-1 rounded bg-blue-600 text-white"
-                                 id="user-type-badge">Guest</div>
-                            <div class="text-xs px-2 py-1 rounded bg-green-600 text-white hidden"
-                                 id="readonly-badge">Read-only</div>
+                <div class="mb-6 bg-gray-800 rounded-lg p-4 shadow-lg">
+                    <div class="grid grid-cols-3 items-start">
+                        <div>
+                            <h1 class="text-2xl font-bold bg-gradient-to-r from-green-400 to-blue-500 bg-clip-text text-transparent">
+                                Terminal Session
+                            </h1>
+                            <p class="text-sm text-gray-400 mt-1">Session ID: {{ session_id }}</p>
+                            <div class="flex items-center gap-3 mt-2">
+                                <div class="text-xs px-2 py-1 rounded bg-blue-600 text-white"
+                                     id="user-type-badge">Guest</div>
+                                <div class="text-xs px-2 py-1 rounded bg-green-600 text-white hidden"
+                                     id="readonly-badge">Read-only</div>
+                            </div>
                         </div>
-                    </div>
-                    <div class="flex items-center space-x-3">
-                        <div class="w-2 h-2 rounded-full bg-red-400" id="status-indicator"></div>
-                        <div id="status" class="text-sm font-medium text-red-400">Disconnected</div>
+                        <!-- Connected Users Dropdown - Center -->
+                        <div class="relative flex justify-center">
+                            <button id="users-dropdown-btn"
+                                    class="bg-gray-700 hover:bg-gray-600 text-white px-3 py-2 rounded-lg transition duration-200 flex items-center gap-2 text-sm">
+                                <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                                    <path d="M13 6a3 3 0 11-6 0 3 3 0 016 0zM18 8a2 2 0 11-4 0 2 2 0 014 0zM14 15a4 4 0 00-8 0v3h8v-3z" />
+                                </svg>
+                                <span id="users-count">Loading...</span>
+                                <svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+                                    <path fill-rule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clip-rule="evenodd" />
+                                </svg>
+                            </button>
+                            <div id="users-dropdown"
+                                 class="hidden absolute top-full mt-2 left-1/2 transform -translate-x-1/2 bg-gray-800 rounded-lg shadow-xl border border-gray-600 min-w-48 z-50">
+                                <div class="p-2 border-b border-gray-600">
+                                    <div class="text-sm font-medium text-gray-300">Connected Users</div>
+                                </div>
+                                <div id="users-list" class="p-2">
+                                    <div class="text-sm text-gray-400">Loading...</div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="flex items-center gap-4 justify-end">
+                            <div class="flex items-center space-x-3">
+                                <div class="w-2 h-2 rounded-full bg-red-400" id="status-indicator"></div>
+                                <div id="status" class="text-sm font-medium text-red-400">Disconnected</div>
+                            </div>
+                            <!-- Logout button placeholder -->
+                            <button id="logout-btn"
+                                    class="hidden text-xs px-3 py-1 bg-red-600 hover:bg-red-700 text-white rounded transition duration-200">
+                                Logout
+                            </button>
+                        </div>
                     </div>
                 </div>
                 <div class="bg-gray-800 rounded-lg p-4 shadow-xl border border-gray-700">
@@ -78,6 +109,10 @@
         let historyReceived = false;
         let userType = 'guest';
         let isReadonly = false;
+        let usersRefreshInterval = null;
+        let usersCountInterval = null;
+        let currentUserId = null;
+        let heartbeatInterval = null;
 
         const authModal = document.getElementById('auth-modal');
         const terminalContainer = document.getElementById('terminal-container');
@@ -88,9 +123,25 @@
         const statusIndicator = document.getElementById('status-indicator');
         const userTypeBadge = document.getElementById('user-type-badge');
         const readonlyBadge = document.getElementById('readonly-badge');
+        const usersDropdownBtn = document.getElementById('users-dropdown-btn');
+        const usersDropdown = document.getElementById('users-dropdown');
+        const usersCount = document.getElementById('users-count');
+        const usersList = document.getElementById('users-list');
+        const logoutBtn = document.getElementById('logout-btn');
 
         async function authenticate() {
             const password = passwordInput.value || '';
+            
+            // Show loading state
+            connectBtn.disabled = true;
+            const originalText = connectBtn.textContent;
+            connectBtn.innerHTML = `
+                <svg class="animate-spin h-4 w-4 text-white inline mr-2" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+                Connecting...
+            `;
             
             try {
                 const response = await fetch(`/api/auth/${sessionId}?password=${encodeURIComponent(password)}`);
@@ -99,11 +150,14 @@
                 if (result.authenticated) {
                     userType = result.user_type || 'guest';
                     isReadonly = result.is_readonly || false;
+                    
                     console.log('Authenticated as:', userType, 'readonly:', isReadonly);
                     updateStatusBadges();
+                    showLogoutButton();
                     authModal.style.display = 'none';
                     terminalContainer.style.display = 'block';
                     initializeTerminal();
+                    startUsersCountPolling();
                 } else {
                     authError.textContent = 'Invalid password';
                     authError.classList.remove('hidden');
@@ -111,6 +165,10 @@
             } catch (e) {
                 authError.textContent = 'Authentication failed';
                 authError.classList.remove('hidden');
+            } finally {
+                // Reset button state
+                connectBtn.disabled = false;
+                connectBtn.textContent = originalText;
             }
         }
 
@@ -133,7 +191,235 @@
             }
         }
 
+        function showLogoutButton() {
+            logoutBtn.classList.remove('hidden');
+        }
+
+        function hideLogoutButton() {
+            logoutBtn.classList.add('hidden');
+        }
+
+        async function logout() {
+            try {
+                await fetch('/api/logout', { method: 'POST' });
+                
+                // Reset state
+                userType = 'guest';
+                isReadonly = false;
+                hideLogoutButton();
+                
+                // Stop polling
+                stopUsersCountPolling();
+                
+                // Clean up terminal
+                cleanupTerminal(true);
+                
+                // Go back to auth modal if needed
+                if (needsAuth) {
+                    terminalContainer.style.display = 'none';
+                    authModal.style.display = 'flex';
+                    passwordInput.value = '';
+                    authError.classList.add('hidden');
+                }
+                
+                // Close websocket
+                if (ws) {
+                    ws.close();
+                }
+                
+                console.log('Logged out successfully');
+            } catch (e) {
+                console.error('Logout failed:', e);
+            }
+        }
+
+        async function fetchConnectedUsers() {
+            try {
+                const response = await fetch(`/api/session/${sessionId}/users`);
+                if (response.ok) {
+                    const users = await response.json();
+                    updateUsersDisplay(users);
+                } else {
+                    console.error('Failed to fetch connected users');
+                    usersCount.textContent = 'Error';
+                }
+            } catch (e) {
+                console.error('Error fetching connected users:', e);
+                usersCount.textContent = 'Error';
+            }
+        }
+
+        function startUsersCountPolling() {
+            // Poll user count every 3 seconds
+            usersCountInterval = setInterval(fetchConnectedUsers, 3000);
+            // Fetch immediately
+            fetchConnectedUsers();
+        }
+
+        function stopUsersCountPolling() {
+            if (usersCountInterval) {
+                clearInterval(usersCountInterval);
+                usersCountInterval = null;
+            }
+        }
+
+        async function sendHeartbeat() {
+            if (currentUserId) {
+                try {
+                    await fetch(`/api/session/${sessionId}/heartbeat/${currentUserId}`, {
+                        method: 'POST'
+                    });
+                } catch (e) {
+                    console.error('Failed to send heartbeat:', e);
+                }
+            }
+        }
+
+        function startHeartbeat() {
+            // Send heartbeat every 5 seconds
+            heartbeatInterval = setInterval(sendHeartbeat, 5000);
+        }
+
+        function stopHeartbeat() {
+            if (heartbeatInterval) {
+                clearInterval(heartbeatInterval);
+                heartbeatInterval = null;
+            }
+        }
+
+        function updateUsersDisplay(users) {
+            // Count users by type
+            const ownerCount = users.filter(u => u.user_type === 'owner').length;
+            const guestCount = users.filter(u => u.user_type === 'guest').length;
+            
+            // Update button text
+            const totalCount = users.length;
+            if (totalCount === 0) {
+                usersCount.textContent = 'No users connected';
+            } else if (totalCount === 1) {
+                usersCount.textContent = '1 user connected';
+            } else {
+                usersCount.textContent = `${totalCount} users connected`;
+            }
+            
+            // Update dropdown list
+            usersList.innerHTML = '';
+            
+            if (users.length === 0) {
+                const emptyDiv = document.createElement('div');
+                emptyDiv.className = 'text-sm text-gray-400';
+                emptyDiv.textContent = 'No users connected';
+                usersList.appendChild(emptyDiv);
+            } else {
+                // Show owner first
+                if (ownerCount > 0) {
+                    const ownerDiv = document.createElement('div');
+                    ownerDiv.className = 'flex items-center gap-2 py-1 text-sm';
+                    ownerDiv.innerHTML = `
+                        <div class="w-2 h-2 rounded-full bg-purple-400"></div>
+                        <span class="text-purple-300">Owner connected</span>
+                    `;
+                    usersList.appendChild(ownerDiv);
+                }
+                
+                // Show guests with smart numbering (lowest available numbers)
+                const guests = users.filter(u => u.user_type === 'guest');
+                const usedNumbers = new Set();
+                const guestNumbers = [];
+                
+                // Assign lowest available numbers
+                guests.forEach((guest, index) => {
+                    let number = 1;
+                    while (usedNumbers.has(number)) {
+                        number++;
+                    }
+                    usedNumbers.add(number);
+                    guestNumbers.push(number);
+                });
+                
+                guests.forEach((guest, index) => {
+                    const guestDiv = document.createElement('div');
+                    guestDiv.className = 'flex items-center gap-2 py-1 text-sm';
+                    guestDiv.innerHTML = `
+                        <div class="w-2 h-2 rounded-full bg-blue-400"></div>
+                        <span class="text-blue-300">Guest ${guestNumbers[index]}</span>
+                    `;
+                    usersList.appendChild(guestDiv);
+                });
+            }
+        }
+
+        function toggleUsersDropdown() {
+            usersDropdown.classList.toggle('hidden');
+            if (!usersDropdown.classList.contains('hidden')) {
+                fetchConnectedUsers();
+                // Refresh user list every 2 seconds while dropdown is open
+                usersRefreshInterval = setInterval(fetchConnectedUsers, 2000);
+            } else {
+                // Stop refreshing when dropdown is closed
+                if (usersRefreshInterval) {
+                    clearInterval(usersRefreshInterval);
+                    usersRefreshInterval = null;
+                }
+            }
+        }
+
+        // Close dropdown when clicking outside
+        document.addEventListener('click', function(event) {
+            if (!usersDropdownBtn.contains(event.target) && !usersDropdown.contains(event.target)) {
+                usersDropdown.classList.add('hidden');
+                // Stop refreshing when dropdown is closed
+                if (usersRefreshInterval) {
+                    clearInterval(usersRefreshInterval);
+                    usersRefreshInterval = null;
+                }
+            }
+        });
+
+        function cleanupTerminal(resetStatus = true) {
+            // Close websocket if open
+            if (ws) {
+                ws.close();
+                ws = null;
+            }
+            
+            // Clear terminal if it exists
+            if (term) {
+                term.dispose();
+                term = null;
+            }
+            
+            // Clear the terminal container
+            const terminalElement = document.getElementById('terminal');
+            if (terminalElement) {
+                terminalElement.innerHTML = '';
+            }
+            
+            // Clear all intervals
+            if (usersRefreshInterval) {
+                clearInterval(usersRefreshInterval);
+                usersRefreshInterval = null;
+            }
+            
+            stopHeartbeat();
+            
+            // Reset flags
+            sessionEnded = false;
+            historyReceived = false;
+            
+            // Only reset status if requested (not during re-initialization)
+            if (resetStatus) {
+                status.textContent = 'Disconnected';
+                status.className = 'text-sm font-medium text-red-400';
+                statusIndicator.className = 'w-2 h-2 rounded-full bg-red-400';
+            }
+            
+            console.log('Terminal cleaned up');
+        }
+
         function initializeTerminal() {
+            // Clean up any existing terminal first (don't reset status during re-initialization)
+            cleanupTerminal(false);
             term = new Terminal({
                 theme: {
                     background: '#000000',
@@ -193,6 +479,11 @@
         }
 
         function connectWebSocket() {
+            // Reset status to connecting first
+            status.textContent = 'Connecting...';
+            status.className = 'text-sm font-medium text-yellow-400';
+            statusIndicator.className = 'w-2 h-2 rounded-full bg-yellow-400';
+            
             const wsUrl = `ws://${window.location.host}/ws/session/${sessionId}?user_type=${userType}`;
             ws = new WebSocket(wsUrl);
             
@@ -213,7 +504,26 @@
             };
             
             ws.onmessage = function(event) {
-                if (event.data instanceof Blob) {
+                // Handle text messages (control messages)
+                if (typeof event.data === 'string') {
+                    try {
+                        const message = JSON.parse(event.data);
+                        if (message.type === 'user_id') {
+                            currentUserId = message.user_id;
+                            console.log('Received user ID:', currentUserId);
+                            startHeartbeat();
+                            return;
+                        }
+                    } catch (e) {
+                        // Not JSON, treat as terminal data
+                        if (!historyReceived) {
+                            term.clear();
+                            historyReceived = true;
+                            console.log('Received terminal history, cleared terminal and writing history');
+                        }
+                        term.write(event.data);
+                    }
+                } else if (event.data instanceof Blob) {
                     event.data.arrayBuffer().then(function(buffer) {
                         const text = new TextDecoder().decode(buffer);
                         // Check for session end marker
@@ -270,15 +580,40 @@
                 authenticate();
             }
         });
+        
+        usersDropdownBtn.addEventListener('click', toggleUsersDropdown);
+        logoutBtn.addEventListener('click', logout);
+
+        // Cleanup on page unload
+        window.addEventListener('beforeunload', function() {
+            cleanupTerminal(true);
+            stopUsersCountPolling();
+            stopHeartbeat();
+        });
+
+        // Handle page visibility changes
+        document.addEventListener('visibilitychange', function() {
+            if (document.hidden) {
+                // Page is hidden, stop polling to save resources
+                stopUsersCountPolling();
+            } else {
+                // Page is visible again, restart polling if authenticated
+                if (term && !sessionEnded) {
+                    startUsersCountPolling();
+                }
+            }
+        });
 
         // Auto-connect if no auth needed
         if (!needsAuth) {
             userType = 'owner'; // No auth means owner access
             isReadonly = false; // Owners are never readonly
             updateStatusBadges();
+            showLogoutButton();
             authModal.style.display = 'none';
             terminalContainer.style.display = 'block';
             initializeTerminal();
+            startUsersCountPolling();
         }
         </script>
     </body>

@@ -3,7 +3,7 @@ use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::{Html, Response};
-use axum::routing::get;
+use axum::routing::{get, post};
 use axum::{Json, Router};
 use clap::Parser;
 use futures_util::{SinkExt, StreamExt};
@@ -128,7 +128,13 @@ async fn main() -> Result<()> {
         .route("/session/{id}", get(session_page))
         .route("/ws/session/{id}", get(handle_session_ws))
         .route("/api/session/{id}", get(get_session_details))
+        .route("/api/session/{id}/users", get(get_connected_users))
+        .route(
+            "/api/session/{session_id}/heartbeat/{user_id}",
+            post(send_heartbeat),
+        )
         .route("/api/auth/{id}", get(authenticate_session))
+        .route("/api/logout", post(logout_session))
         .with_state(app_state);
 
     let addr = format!("{}:{}", args.host, args.port);
@@ -279,6 +285,54 @@ async fn get_session_details(
     Ok(Json(details))
 }
 
+async fn get_connected_users(
+    Path(session_id): Path<String>,
+    State(state): State<AppState>,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    let client = reqwest::Client::new();
+    let url = format!("{}/api/session/{}/users", state.tunnel_base, session_id);
+
+    let response = client
+        .get(&url)
+        .send()
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    if !response.status().is_success() {
+        return Err(StatusCode::NOT_FOUND);
+    }
+
+    let users: serde_json::Value = response
+        .json()
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    Ok(Json(users))
+}
+
+async fn send_heartbeat(
+    Path((session_id, user_id)): Path<(String, String)>,
+    State(state): State<AppState>,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    let client = reqwest::Client::new();
+    let url = format!(
+        "{}/api/session/{}/heartbeat/{}",
+        state.tunnel_base, session_id, user_id
+    );
+
+    let response = client
+        .post(&url)
+        .send()
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    if response.status().is_success() {
+        Ok(Json(serde_json::json!({"success": true})))
+    } else {
+        Err(StatusCode::INTERNAL_SERVER_ERROR)
+    }
+}
+
 async fn authenticate_session(
     Path(session_id): Path<String>,
     Query(auth): Query<AuthQuery>,
@@ -339,6 +393,13 @@ async fn authenticate_session(
         "authenticated": authenticated,
         "user_type": user_type,
         "is_readonly": is_readonly
+    })))
+}
+
+async fn logout_session() -> Result<Json<serde_json::Value>, StatusCode> {
+    Ok(Json(serde_json::json!({
+        "success": true,
+        "message": "Logged out successfully"
     })))
 }
 
