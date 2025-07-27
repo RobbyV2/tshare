@@ -6,7 +6,16 @@
 
 [![Version](https://img.shields.io/badge/Version-1.0.0-blue.svg)](https://www.rust-lang.org)
 
-Terminal sharing through web links.
+Collaborative terminal sharing.
+
+## Screenshots
+
+<div align="center">
+  <img src="resources/1.png" alt="TShare Screenshot 1" width="45%" />
+  <img src="resources/2.png" alt="TShare Screenshot 2" width="45%" />
+  <br><br>
+  <img src="resources/3.png" alt="TShare Screenshot 3" width="90%" />
+</div>
 
 ## Requirements
 
