@@ -28,3 +28,4 @@ dashmap = { workspace = true }
 bcrypt = { workspace = true }
 tokio-tungstenite = { workspace = true }
 clap = { workspace = true }
+chrono = { workspace = true }

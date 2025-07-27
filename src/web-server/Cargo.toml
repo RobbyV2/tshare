@@ -27,3 +27,4 @@ tracing-subscriber = { workspace = true }
 bcrypt = { workspace = true }
 reqwest = { workspace = true }
 clap = { workspace = true }
+chrono = { workspace = true }

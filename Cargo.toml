@@ -44,6 +44,12 @@ dashmap = "6.1"
 # Security dependencies
 bcrypt = "0.17"
 
+# Date/time dependencies
+chrono = { version = "0.4", features = ["serde"] }
+
+# JWT dependencies
+jsonwebtoken = "9.3"
+
 # Dioxus dependencies
 dioxus = { version = "0.6", features = ["fullstack", "router"] }
 
