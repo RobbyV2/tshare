@@ -1,0 +1,206 @@
+name: Build and Publish TShare
+
+on:
+  push:
+    branches:
+      - '**'
+  pull_request:
+  workflow_dispatch:
+
+permissions: write-all
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  lint:
+    name: Lint and Format Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.88"
+          components: rustfmt, clippy
+
+      - name: Install just
+        uses: extractions/setup-just@v1
+
+      - name: Install HTML formatter
+        run: pip install djlint
+
+      - name: Install taplo-cli
+        run: cargo install taplo-cli
+
+      - name: Check formatting
+        run: just format-check
+
+      - name: Run clippy
+        run: just lint
+
+      - name: Run tests
+        run: just test
+
+  build:
+    name: Build Multi-Platform
+    needs: lint
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        target:
+          - x86_64-unknown-linux-gnu
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.88"
+          targets: ${{ matrix.target }}
+
+      - name: Build release
+        run: cargo build --release --target ${{ matrix.target }}
+
+      - name: Prepare Artifacts
+        run: |
+          mkdir -p release
+          cp target/${{ matrix.target }}/release/tshare release/tshare-linux-x64
+          cp target/${{ matrix.target }}/release/tunnel-server release/tunnel-server-linux-x64
+          cp target/${{ matrix.target }}/release/web-server release/web-server-linux-x64
+          chmod +x release/*
+
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: tshare-${{ matrix.target }}
+          path: release/*
+          retention-days: 7
+          if-no-files-found: error
+
+  build-deb:
+    name: Build Debian Package
+    needs: lint
+    runs-on: ubuntu-latest
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.88"
+
+      - name: Install just
+        uses: extractions/setup-just@v1
+
+      - name: Install dpkg-dev
+        run: sudo apt-get update && sudo apt-get install -y dpkg-dev
+
+      - name: Build .deb package
+        run: just build-deb
+
+      - name: Upload .deb Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: tshare-deb
+          path: releases/*.deb
+          retention-days: 7
+          if-no-files-found: error
+
+  publish:
+    name: Publish Release
+    needs: [build, build-deb]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      discussions: write
+      pull-requests: write
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && contains(github.event.head_commit.message, '.') && (startsWith(github.event.head_commit.message, '0.') || startsWith(github.event.head_commit.message, '1.') || startsWith(github.event.head_commit.message, '2.') || startsWith(github.event.head_commit.message, '3.') || startsWith(github.event.head_commit.message, '4.') || startsWith(github.event.head_commit.message, '5.') || startsWith(github.event.head_commit.message, '6.') || startsWith(github.event.head_commit.message, '7.') || startsWith(github.event.head_commit.message, '8.') || startsWith(github.event.head_commit.message, '9.'))
+    
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      
+      - name: Create Git Tag
+        run: |
+          git config --global user.name "GitHub Actions"
+          git config --global user.email "actions@github.com"
+          TAG_NAME=$(git log -1 --pretty=%s | grep -oE '\b[0-9]+\.[0-9]+\.[0-9]+\b')
+          TAG_NAME="v${TAG_NAME}"
+          if git rev-parse "$TAG_NAME" >/dev/null 2>&1; then
+            echo "Tag $TAG_NAME already exists. Skipping tag creation."
+          else
+            git tag "$TAG_NAME"
+            git push origin "$TAG_NAME"
+          fi
+          echo "TAG_NAME=${TAG_NAME}" >> $GITHUB_ENV
+          
+      - name: Download Linux Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: tshare-x86_64-unknown-linux-gnu
+          path: artifacts/linux
+
+      - name: Download Debian Package
+        uses: actions/download-artifact@v4
+        with:
+          name: tshare-deb
+          path: artifacts/deb
+
+      - name: Prepare Release Files
+        run: |
+          mkdir -p release
+          cp artifacts/linux/* release/
+          cp artifacts/deb/*.deb release/
+          chmod +x release/tshare-linux-x64 release/tunnel-server-linux-x64 release/web-server-linux-x64
+
+      - name: Create Release and Upload Assets
+        uses: softprops/action-gh-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG_NAME: ${{ env.TAG_NAME }}
+        with:
+          tag_name: ${{ env.TAG_NAME }}
+          name: TShare ${{ env.TAG_NAME }}
+          body: |
+            TShare - Terminal Sharing Made Simple
+            
+            ## What's New
+            - See the full changelog: https://github.com/${{ github.repository }}/compare/${{ env.TAG_NAME }}~1...${{ env.TAG_NAME }}
+            
+            ## Installation
+            
+            ### Debian/Ubuntu
+            ```bash
+            # Download and install the .deb package
+            wget https://github.com/${{ github.repository }}/releases/download/${{ env.TAG_NAME }}/tshare_*.deb
+            sudo dpkg -i tshare_*.deb
+            ```
+            
+            ### Linux Binary
+            ```bash
+            # Download binaries
+            wget https://github.com/${{ github.repository }}/releases/download/${{ env.TAG_NAME }}/tshare-linux-x64
+            wget https://github.com/${{ github.repository }}/releases/download/${{ env.TAG_NAME }}/tunnel-server-linux-x64
+            wget https://github.com/${{ github.repository }}/releases/download/${{ env.TAG_NAME }}/web-server-linux-x64
+            chmod +x tshare-linux-x64 tunnel-server-linux-x64 web-server-linux-x64
+            ```
+            
+            ## Usage
+            ```bash
+            # Start servers
+            ./tunnel-server-linux-x64 &
+            ./web-server-linux-x64 &
+            
+            # Share your terminal
+            ./tshare-linux-x64 share
+            ```
+          files: |
+            release/tshare-linux-x64
+            release/tunnel-server-linux-x64
+            release/web-server-linux-x64
+            release/*.deb
