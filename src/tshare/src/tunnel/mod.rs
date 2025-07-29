@@ -84,47 +84,17 @@ struct WebSocketQuery {
     version,
     about = "TShare tunnel server - handles PTY data streams"
 )]
-struct Args {
+pub struct Args {
     /// Host to bind the server to
     #[arg(long, default_value = "127.0.0.1")]
-    host: String,
+    pub host: String,
 
     /// Port for the server
     #[arg(long, default_value_t = 8385)]
-    port: u16,
+    pub port: u16,
 }
 
-#[tokio::main]
-async fn main() -> Result<()> {
-    // Create ~/.tshare directory if it doesn't exist
-    let home_dir = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
-    let tshare_dir = format!("{home_dir}/.tshare");
-    std::fs::create_dir_all(&tshare_dir)?;
-
-    // Clear previous log file
-    let log_path = format!("{tshare_dir}/tunnel-server.log");
-    let _ = std::fs::remove_file(&log_path);
-
-    // Configure logging to both console and file
-    let log_file = std::fs::OpenOptions::new()
-        .create(true)
-        .write(true)
-        .truncate(true)
-        .open(&log_path)?;
-
-    use tracing_subscriber::fmt::writer::MakeWriterExt;
-    let writer = std::io::stdout.and(log_file);
-
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
-        )
-        .with_writer(writer)
-        .init();
-
-    let args = Args::parse();
-
+pub async fn run_tunnel_server(args: Args) -> Result<()> {
     let sessions: SessionMap = Arc::new(DashMap::new());
     let app_state = AppState { sessions };
 

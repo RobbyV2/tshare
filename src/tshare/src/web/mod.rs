@@ -41,51 +41,21 @@ struct WebSocketQuery {
     version,
     about = "TShare web server - serves terminal sessions via web interface"
 )]
-struct Args {
+pub struct Args {
     /// Host to bind the web server to
     #[arg(long, default_value = "127.0.0.1")]
-    host: String,
+    pub host: String,
 
     /// Port for the web server
     #[arg(long, default_value_t = 8386)]
-    port: u16,
+    pub port: u16,
 
     /// Tunnel server base URL
     #[arg(long, default_value = "http://127.0.0.1:8385")]
-    tunnel_url: String,
+    pub tunnel_url: String,
 }
 
-#[tokio::main]
-async fn main() -> Result<()> {
-    // Create ~/.tshare directory if it doesn't exist
-    let home_dir = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
-    let tshare_dir = format!("{home_dir}/.tshare");
-    std::fs::create_dir_all(&tshare_dir)?;
-
-    // Clear previous log file
-    let log_path = format!("{tshare_dir}/web-server.log");
-    let _ = std::fs::remove_file(&log_path);
-
-    // Configure logging to both console and file
-    let log_file = std::fs::OpenOptions::new()
-        .create(true)
-        .write(true)
-        .truncate(true)
-        .open(&log_path)?;
-
-    use tracing_subscriber::fmt::writer::MakeWriterExt;
-    let writer = std::io::stdout.and(log_file);
-
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
-        )
-        .with_writer(writer)
-        .init();
-
-    let args = Args::parse();
-
+pub async fn run_web_server(args: Args) -> Result<()> {
     // Validate connection to tunnel server before starting
     info!(
         "Validating connection to tunnel server at: {}",

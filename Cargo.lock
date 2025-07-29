@@ -2114,12 +2114,16 @@ checksum = "e421abadd41a4225275504ea4d6566923418b7f05506fbc9c0fe86ba7396114b"
 
 [[package]]
 name = "tshare"
-version = "1.0.1"
+version = "1.0.2"
 dependencies = [
  "anyhow",
+ "axum",
+ "bcrypt",
+ "chrono",
  "clap",
  "crossterm",
  "ctrlc",
+ "dashmap",
  "futures-util",
  "portable-pty",
  "reqwest",
@@ -2130,6 +2134,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "url",
+ "uuid",
 ]
 
 [[package]]
@@ -2164,26 +2169,6 @@ dependencies = [
  "sha1",
  "thiserror 2.0.12",
  "utf-8",
-]
-
-[[package]]
-name = "tunnel-server"
-version = "1.0.1"
-dependencies = [
- "anyhow",
- "axum",
- "bcrypt",
- "chrono",
- "clap",
- "dashmap",
- "futures-util",
- "serde",
- "serde_json",
- "tokio",
- "tokio-tungstenite 0.27.0",
- "tracing",
- "tracing-subscriber",
- "uuid",
 ]
 
 [[package]]
@@ -2361,25 +2346,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1a05d73b933a847d6cccdda8f838a22ff101ad9bf93e33684f39c1f5f0eece3d"
 dependencies = [
  "unicode-ident",
-]
-
-[[package]]
-name = "web-server"
-version = "1.0.1"
-dependencies = [
- "anyhow",
- "axum",
- "bcrypt",
- "chrono",
- "clap",
- "futures-util",
- "reqwest",
- "serde",
- "serde_json",
- "tokio",
- "tokio-tungstenite 0.27.0",
- "tracing",
- "tracing-subscriber",
 ]
 
 [[package]]

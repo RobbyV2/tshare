@@ -68,8 +68,6 @@ jobs:
         run: |
           mkdir -p release
           cp target/${{ matrix.target }}/release/tshare release/tshare-linux-x64
-          cp target/${{ matrix.target }}/release/tunnel-server release/tunnel-server-linux-x64
-          cp target/${{ matrix.target }}/release/web-server release/web-server-linux-x64
           chmod +x release/*
 
       - name: Upload Artifacts
@@ -156,7 +154,7 @@ jobs:
           mkdir -p release
           cp artifacts/linux/* release/
           cp artifacts/deb/*.deb release/
-          chmod +x release/tshare-linux-x64 release/tunnel-server-linux-x64 release/web-server-linux-x64
+          chmod +x release/tshare-linux-x64
 
       - name: Create Release and Upload Assets
         uses: softprops/action-gh-release@v1
@@ -183,24 +181,22 @@ jobs:
             
             ### Linux Binary
             ```bash
-            # Download binaries
+            # Download binary
             wget https://github.com/${{ github.repository }}/releases/download/${{ env.TAG_NAME }}/tshare-linux-x64
-            wget https://github.com/${{ github.repository }}/releases/download/${{ env.TAG_NAME }}/tunnel-server-linux-x64
-            wget https://github.com/${{ github.repository }}/releases/download/${{ env.TAG_NAME }}/web-server-linux-x64
-            chmod +x tshare-linux-x64 tunnel-server-linux-x64 web-server-linux-x64
+            chmod +x tshare-linux-x64
             ```
             
             ## Usage
             ```bash
-            # Start servers
-            ./tunnel-server-linux-x64 &
-            ./web-server-linux-x64 &
+            # Start tunnel server
+            ./tshare-linux-x64 tunnel &
+            
+            # Start web server  
+            ./tshare-linux-x64 web &
             
             # Share your terminal
-            ./tshare-linux-x64 share
+            ./tshare-linux-x64 connect
             ```
           files: |
             release/tshare-linux-x64
-            release/tunnel-server-linux-x64
-            release/web-server-linux-x64
             release/*.deb

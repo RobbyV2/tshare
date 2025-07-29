@@ -11,6 +11,9 @@ use tokio::sync::mpsc;
 use tokio_tungstenite::{connect_async, tungstenite::Message};
 use tracing::{error, info};
 
+mod tunnel;
+mod web;
+
 #[derive(Parser, Debug)]
 #[command(author, version, about = "Share your terminal session via a web link.")]
 struct Args {
@@ -54,6 +57,10 @@ enum Commands {
         #[arg(long, default_value_t = false)]
         guest_readonly: bool,
     },
+    /// Start the tunnel server that handles PTY data streams.
+    Tunnel(tunnel::Args),
+    /// Start the web server that serves terminal sessions via web interface.
+    Web(web::Args),
 }
 
 #[derive(Serialize)]
@@ -81,34 +88,66 @@ struct ConnectConfig {
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    let args = Args::parse();
+
     // Create ~/.tshare directory if it doesn't exist
     let home_dir = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
     let tshare_dir = format!("{home_dir}/.tshare");
     std::fs::create_dir_all(&tshare_dir)?;
 
+    // Determine log file based on subcommand
+    let (log_path, console_output) = match &args.command {
+        Commands::Connect { .. } => (format!("{tshare_dir}/tshare.log"), false), // No console output for connect
+        Commands::Tunnel(_) => (format!("{tshare_dir}/tshare-tunnel.log"), true), // Console output for servers
+        Commands::Web(_) => (format!("{tshare_dir}/tshare-web.log"), true),
+    };
+
     // Clear previous log file
-    let log_path = format!("{tshare_dir}/tshare.log");
     let _ = std::fs::remove_file(&log_path);
 
-    // Configure file-based logging with no visible output
+    // Configure logging based on subcommand
     let log_file = std::fs::OpenOptions::new()
         .create(true)
         .write(true)
         .truncate(true)
         .open(&log_path)?;
 
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
-        )
-        .with_writer(log_file)
-        .with_ansi(false)
-        .init();
+    if console_output {
+        // For servers: log to both console and file
+        use tracing_subscriber::fmt::writer::MakeWriterExt;
+        let writer = std::io::stdout.and(log_file);
 
-    let args = Args::parse();
+        tracing_subscriber::fmt()
+            .with_env_filter(
+                tracing_subscriber::EnvFilter::try_from_default_env()
+                    .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
+            )
+            .with_writer(writer)
+            .init();
+    } else {
+        // For connect: only log to file
+        tracing_subscriber::fmt()
+            .with_env_filter(
+                tracing_subscriber::EnvFilter::try_from_default_env()
+                    .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
+            )
+            .with_writer(log_file)
+            .with_ansi(false)
+            .init();
+    }
 
-    info!("Starting tshare client");
+    // Log startup message based on subcommand
+    match &args.command {
+        Commands::Connect { .. } => {
+            info!("Starting tshare client");
+        }
+        Commands::Tunnel(_) => {
+            info!("Starting tshare tunnel server");
+        }
+        Commands::Web(_) => {
+            info!("Starting tshare web server");
+        }
+    }
 
     match args.command {
         Commands::Connect {
@@ -131,6 +170,8 @@ async fn main() -> Result<()> {
             };
             run_connect(config).await
         }
+        Commands::Tunnel(tunnel_args) => tunnel::run_tunnel_server(tunnel_args).await,
+        Commands::Web(web_args) => web::run_web_server(web_args).await,
     }
 }
 

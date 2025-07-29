@@ -44,8 +44,8 @@
 # Binaries will be in target/release/</pre>
         <h2>Usage</h2>
         <p>Start servers:</p>
-        <pre>tunnel-server &
-web-server &</pre>
+        <pre>tshare tunnel &
+tshare web &</pre>
         <p>Share terminal:</p>
         <pre>tshare connect</pre>
         <h2>Development</h2>
@@ -64,10 +64,10 @@ just build-deb      # Build .deb package</pre>
                 <code>tshare</code>: CLI client, captures terminal sessions
             </li>
             <li>
-                <code>tunnel-server</code>: WebSocket relay and API, port 8385
+                <code>tshare tunnel</code>: WebSocket relay and API, port 8385
             </li>
             <li>
-                <code>web-server</code>: Web interface, port 8386
+                <code>tshare web</code>: Web interface, port 8386
             </li>
         </ul>
         <h2>Configuration</h2>
@@ -75,8 +75,8 @@ just build-deb      # Build .deb package</pre>
             All binaries accept <code>--help</code> for options. Default configuration works for local development.
         </p>
         <p>Production example:</p>
-        <pre>tunnel-server --host 0.0.0.0
-web-server --host 0.0.0.0 --tunnel-url http://tunnel.example.com:8385
+        <pre>tshare tunnel --host 0.0.0.0
+tshare web --host 0.0.0.0 --tunnel-url http://tunnel.example.com:8385
 tshare connect --tunnel-host tunnel.example.com --web-host web.example.com</pre>
         <p>
             Source: <a href="https://github.com/RobbyV2/tshare">github.com/RobbyV2/tshare</a>

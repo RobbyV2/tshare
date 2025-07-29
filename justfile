@@ -5,11 +5,11 @@ default:
 
 # Run tunnel server only
 tunnel *args:
-    cargo run --bin tunnel-server -- {{args}}
+    cargo run --bin tshare -- tunnel {{args}}
 
 # Run web server only  
 web *args:
-    cargo run --bin web-server -- {{args}}
+    cargo run --bin tshare -- web {{args}}
 
 # Run client only
 client *args:
@@ -23,18 +23,18 @@ run:
     echo "Starting TShare servers..."
     echo "Tunnel server will be available on port 8385 (API and WebSocket)"
     echo "Web server will be available on port 8386"
-    echo "Logs are written to ~/.tshare/tunnel-server.log and ~/.tshare/web-server.log"
+    echo "Logs are written to ~/.tshare/tshare-tunnel.log and ~/.tshare/tshare-web.log"
     echo "Press Ctrl+C to stop all servers"
     echo ""
     
     # Start tunnel server and web server in parallel with log prefixes
-    (cargo run --bin tunnel-server 2>&1 | sed 's/^/[tunnel-server]: /') &
+    (cargo run --bin tshare -- tunnel 2>&1 | sed 's/^/[tunnel]: /') &
     TUNNEL_PID=$!
     
     # Give tunnel server time to start
     sleep 2
     
-    (cargo run --bin web-server 2>&1 | sed 's/^/[web-server]: /') &
+    (cargo run --bin tshare -- web 2>&1 | sed 's/^/[web]: /') &
     WEB_PID=$!
     
     # Function to cleanup processes on exit
@@ -100,9 +100,7 @@ test:
 
 # Install all binaries
 install:
-    cargo install --path . --bin tunnel-server
-    cargo install --path . --bin web-server  
-    cargo install --path . --bin tshare
+    cargo install --path src/tshare --bin tshare
 
 # Clean build artifacts
 clean:
@@ -114,14 +112,14 @@ logs:
     echo "=== TShare Logs ==="
     echo "Logs are located in ~/.tshare/"
     echo ""
-    if [ -f ~/.tshare/tunnel-server.log ]; then
+    if [ -f ~/.tshare/tshare-tunnel.log ]; then
         echo "=== Tunnel Server Log ==="
-        tail -20 ~/.tshare/tunnel-server.log
+        tail -20 ~/.tshare/tshare-tunnel.log
         echo ""
     fi
-    if [ -f ~/.tshare/web-server.log ]; then
+    if [ -f ~/.tshare/tshare-web.log ]; then
         echo "=== Web Server Log ==="
-        tail -20 ~/.tshare/web-server.log
+        tail -20 ~/.tshare/tshare-web.log
         echo ""
     fi
     if [ -f ~/.tshare/tshare.log ]; then
@@ -137,7 +135,7 @@ logs-follow:
     echo "Logs are located in ~/.tshare/"
     echo ""
     if command -v multitail >/dev/null 2>&1; then
-        multitail -f ~/.tshare/tunnel-server.log -f ~/.tshare/web-server.log -f ~/.tshare/tshare.log
+        multitail -f ~/.tshare/tshare-tunnel.log -f ~/.tshare/tshare-web.log -f ~/.tshare/tshare.log
     else
         echo "Install multitail for better log following, falling back to tail..."
         tail -f ~/.tshare/*.log 2>/dev/null || echo "No log files found"
@@ -174,8 +172,6 @@ build-deb:
     
     # Copy binaries
     cp target/release/tshare "$PKG_DIR/usr/bin/"
-    cp target/release/tunnel-server "$PKG_DIR/usr/bin/"
-    cp target/release/web-server "$PKG_DIR/usr/bin/"
     
     # Make binaries executable
     chmod +x "$PKG_DIR/usr/bin/"*
@@ -194,12 +190,10 @@ build-deb:
     Maintainer: RobbyV2 <robby@robby.blue>
     Description: Terminal sharing made simple
      TShare lets you share your terminal session with anyone through a simple web link.
-     Perfect for pair programming, debugging, teaching, or getting help.
-     .
      This package includes:
-     - tshare: CLI client for sharing terminal sessions
-     - tunnel-server: WebSocket relay server for terminal data
-     - web-server: Web interface for viewing shared terminals
+     - tshare connect: CLI client for sharing terminal sessions
+     - tshare tunnel: WebSocket relay server for terminal data
+     - tshare web: Web interface for viewing shared terminals
     Homepage: https://github.com/RobbyV2/tshare
     EOF
     
@@ -211,8 +205,8 @@ build-deb:
     echo "TShare installed successfully!"
     echo ""
     echo "Quick start:"
-    echo "1. Start servers: tunnel-server & web-server &"
-    echo "2. Share terminal: tshare share"
+    echo "1. Start servers: tshare tunnel & tshare web &"
+    echo "2. Share terminal: tshare connect"
     echo ""
     echo "For more information, see: https://github.com/RobbyV2/tshare"
     

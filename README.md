@@ -4,7 +4,7 @@
 [![Rust](https://img.shields.io/badge/rust-1.88-blue.svg)](https://www.rust-lang.org)
 [![GitHub](https://img.shields.io/github/stars/RobbyV2/tshare?style=social)](https://github.com/RobbyV2/tshare)
 
-[![Version](https://img.shields.io/badge/Version-1.0.1-blue.svg)](https://www.rust-lang.org)
+[![Version](https://img.shields.io/badge/Version-1.0.2-blue.svg)](https://www.rust-lang.org)
 
 Collaborative terminal sharing.
 
@@ -38,8 +38,8 @@ cargo build --release
 
 Start servers:
 ```bash
-tunnel-server &
-web-server &
+tshare tunnel &
+tshare web &
 ```
 
 Share terminal:
@@ -65,8 +65,8 @@ just build-deb      # Build .deb package
 ## Architecture
 
 - `tshare`: CLI client, captures terminal sessions
-- `tunnel-server`: WebSocket relay and API, port 8385
-- `web-server`: Web interface, port 8386
+- `tshare tunnel`: WebSocket relay and API, port 8385
+- `tshare web`: Web interface, port 8386
 
 ## Configuration
 
@@ -74,8 +74,8 @@ All binaries accept `--help` for options. Default configuration works for local 
 
 Production example:
 ```bash
-tunnel-server --host 0.0.0.0
-web-server --host 0.0.0.0 --tunnel-url http://tunnel.example.com:8385
+tshare tunnel --host 0.0.0.0
+tshare web --host 0.0.0.0 --tunnel-url http://tunnel.example.com:8385
 tshare connect --tunnel-host tunnel.example.com --web-host web.example.com
 ```
 
