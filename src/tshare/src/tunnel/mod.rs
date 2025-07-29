@@ -1,3 +1,66 @@
+//! # TShare Tunnel Server Module
+//!
+//! The tunnel server acts as the central coordination hub for terminal sharing sessions.
+//! It manages active sessions, handles authentication, routes data between terminal
+//! clients and web viewers, and maintains session history for late-joining users.
+//!
+//! ## Architecture
+//!
+//! ```text
+//! ┌─────────────────┐       ┌─────────────────┐       ┌─────────────────┐
+//! │  Terminal       │       │  Tunnel Server  │       │  Web Clients    │
+//! │  Client (PTY)   │◄─────►│                 │◄─────►│  (Browsers)     │
+//! │                 │       │  - Session Mgmt │       │                 │
+//! │  WebSocket      │       │  - Auth & Perms │       │  WebSocket      │
+//! │  Connection     │       │  - Data Routing │       │  Connections    │
+//! └─────────────────┘       │  - History      │       └─────────────────┘
+//!                           └─────────────────┘
+//! ```
+//!
+//! ## Key Components
+//!
+//! ### Session Management
+//! - **Session Creation**: REST API endpoint for creating new sessions
+//! - **Session Storage**: In-memory storage using concurrent HashMap (DashMap)  
+//! - **Session Lifecycle**: Automatic cleanup when terminal clients disconnect
+//!
+//! ### Authentication & Authorization
+//! - **Password Hashing**: bcrypt for secure password storage
+//! - **Role-based Access**: Owner vs Guest permissions
+//! - **Read-only Mode**: Optional restriction for guest users
+//!
+//! ### Data Routing  
+//! - **Broadcast Channels**: Efficient distribution of terminal output to multiple web clients
+//! - **Bidirectional Flow**: Terminal output to web, web input back to terminal
+//! - **Protocol Handling**: WebSocket message routing and control message parsing
+//!
+//! ### History & State
+//! - **Terminal History**: Buffered output for late-joining web clients
+//! - **Connected Users**: Real-time tracking of active web viewers
+//! - **Heartbeat System**: Connection health monitoring
+//!
+//! ## API Endpoints
+//!
+//! ### REST API
+//! - `POST /api/session` - Create new session
+//! - `GET /api/session/{id}` - Get session details  
+//! - `GET /api/session/{id}/users` - List connected users
+//! - `POST /api/session/{id}/heartbeat/{user_id}` - Update user heartbeat
+//!
+//! ### WebSocket Endpoints  
+//! - `WS /ws/pty/{id}` - Terminal client connection
+//! - `WS /ws/web/{id}?user_type={owner|guest}` - Web client connection
+//!
+//! ## Example Usage
+//!
+//! ```bash
+//! # Start tunnel server on all interfaces
+//! tshare tunnel --host 0.0.0.0 --port 8385
+//!
+//! # Start with custom configuration
+//! tshare tunnel --host tunnel.example.com --port 9000
+//! ```
+
 use anyhow::Result;
 use axum::extract::ws::{Message, WebSocket};
 use axum::extract::{Path, Query, State, WebSocketUpgrade};
@@ -14,29 +77,68 @@ use tokio::sync::{RwLock, broadcast, mpsc};
 use tracing::{error, info, warn};
 use uuid::Uuid;
 
+/// Concurrent session storage using DashMap for thread-safe access
 type SessionMap = Arc<DashMap<String, SessionState>>;
 
+/// Core session state containing all information needed to manage a terminal sharing session
+///
+/// Each session represents one active terminal (PTY) that can be viewed and potentially
+/// controlled by multiple web users. The session manages authentication, permissions,
+/// data routing, and connection tracking.
+///
+/// # Concurrency
+/// The session state is designed for high concurrency with multiple web users connecting
+/// and disconnecting while terminal output continues flowing. Uses broadcast channels
+/// for efficient data distribution and async-safe locks where needed.
 #[derive(Clone)]
 struct SessionState {
+    /// Unique session identifier (UUID)
     session_id: String,
+    /// Bcrypt hash of owner password (if set)
     owner_password_hash: Option<String>,
+    /// Bcrypt hash of guest password (if set)
     guest_password_hash: Option<String>,
+    /// Whether guest users have read-only access
     is_guest_readonly: bool,
-    // Broadcast channel for PTY data going to web clients
+
+    /// Broadcast channel for distributing PTY output to multiple web clients
+    ///
+    /// Terminal output flows: PTY Client → Broadcast → Web Clients
+    /// Uses tokio broadcast channel for efficient fan-out to multiple receivers
     pty_broadcast: broadcast::Sender<Vec<u8>>,
-    // Sender for web data going to PTY client
+
+    /// Channel for routing web input back to the PTY client
+    ///
+    /// Web input flows: Web Clients → MPSC Channel → PTY Client  
+    /// Wrapped in `Arc<RwLock>` since PTY client may disconnect/reconnect
     web_to_pty_tx: Arc<RwLock<Option<mpsc::Sender<Vec<u8>>>>>,
-    // Terminal history buffer
+
+    /// Terminal output history buffer for late-joining web clients
+    ///
+    /// New web connections receive this history immediately after connecting
+    /// to see previous terminal output. Memory usage grows with session duration.
     history: Arc<RwLock<Vec<u8>>>,
-    // Connected users tracking - using DashMap for concurrent access
+
+    /// Real-time tracking of connected web users
+    ///
+    /// Used for displaying connection counts and managing heartbeats.
+    /// DashMap provides concurrent access without blocking other operations.
     connected_users: Arc<DashMap<String, ConnectedUser>>,
 }
 
+/// Information about a connected web user
+///
+/// Tracks user identity, connection time, and heartbeat for health monitoring.
+/// Users are automatically removed when they stop sending heartbeats.
 #[derive(Clone)]
 struct ConnectedUser {
+    /// User type: "owner" or "guest"
     user_type: String,
+    /// Unique user identifier (UUID)
     user_id: String,
+    /// Human-readable connection timestamp
     connected_at: String,
+    /// Last heartbeat timestamp for connection health monitoring
     #[allow(dead_code)]
     last_heartbeat: std::sync::Arc<std::sync::RwLock<chrono::DateTime<chrono::Utc>>>,
 }
@@ -94,6 +196,56 @@ pub struct Args {
     pub port: u16,
 }
 
+/// Starts the tunnel server for coordinating terminal sharing sessions
+///
+/// The tunnel server is the central hub that manages all terminal sharing sessions.
+/// It provides both REST API endpoints for session management and WebSocket endpoints
+/// for real-time data streaming between terminal clients and web viewers.
+///
+/// # Architecture
+///
+/// The server handles three types of connections:
+/// 1. **Terminal Clients**: Connect via WebSocket to `/ws/pty/{session_id}`
+/// 2. **Web Clients**: Connect via WebSocket to `/ws/web/{session_id}`
+/// 3. **REST Clients**: Use HTTP endpoints for session management
+///
+/// # Arguments
+///
+/// * `args` - Server configuration including host and port
+///
+/// # Returns
+///
+/// * `Result<()>` - Success or error result
+///
+/// # Example
+///
+/// ```rust,no_run
+/// use tshare::tunnel::{Args, run_tunnel_server};
+///
+/// # async fn example() -> anyhow::Result<()> {
+/// let args = Args {
+///     host: "0.0.0.0".to_string(),
+///     port: 8385,
+/// };
+///
+/// run_tunnel_server(args).await?;
+/// # Ok(())
+/// # }
+/// ```
+///
+/// # Behavior
+///
+/// The server will:
+/// - Bind to the specified host and port
+/// - Accept incoming HTTP and WebSocket connections
+/// - Route REST API calls to appropriate handlers
+/// - Manage WebSocket connections for real-time data streaming
+/// - Handle session lifecycle and cleanup
+/// - Log connection events and errors
+///
+/// # Endpoints
+///
+/// See module documentation for complete endpoint listing.
 pub async fn run_tunnel_server(args: Args) -> Result<()> {
     let sessions: SessionMap = Arc::new(DashMap::new());
     let app_state = AppState { sessions };

@@ -1,20 +1,20 @@
 # TShare
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Crates.io Version](https://img.shields.io/crates/v/tshare)](https://crates.io/crates/tshare)
+[![MIT License](https://img.shields.io/crates/l/tshare)](https://crates.io/crates/tshare)
 [![Rust](https://img.shields.io/badge/rust-1.88-blue.svg)](https://www.rust-lang.org)
 [![GitHub](https://img.shields.io/github/stars/RobbyV2/tshare?style=social)](https://github.com/RobbyV2/tshare)
 
-[![Version](https://img.shields.io/badge/Version-1.0.3-blue.svg)](https://www.rust-lang.org)
 
 Collaborative terminal sharing.
 
 ## Screenshots
 
 <div align="center">
-  <img src="resources/1.png" alt="TShare Screenshot 1" width="45%" />
+  <img src="resources/3.png" alt="TShare Screenshot 1" width="45%" />
   <img src="resources/2.png" alt="TShare Screenshot 2" width="45%" />
   <br><br>
-  <img src="resources/3.png" alt="TShare Screenshot 3" width="90%" />
+  <img src="resources/1.png" alt="TShare Screenshot 3" width="90%" />
 </div>
 
 ## Requirements

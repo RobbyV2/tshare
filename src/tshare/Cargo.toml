@@ -9,10 +9,15 @@ description = "Terminal sharing client - share your terminal session through a w
 keywords.workspace = true
 categories.workspace = true
 edition.workspace = true
+include = ["src/**/*", "public/**/*"]
 
 [[bin]]
 name = "tshare"
 path = "src/main.rs"
+
+[lib]
+name = "tshare"
+path = "src/lib.rs"
 
 [dependencies]
 tokio = { workspace = true }
