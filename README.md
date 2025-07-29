@@ -4,7 +4,7 @@
 [![Rust](https://img.shields.io/badge/rust-1.88-blue.svg)](https://www.rust-lang.org)
 [![GitHub](https://img.shields.io/github/stars/RobbyV2/tshare?style=social)](https://github.com/RobbyV2/tshare)
 
-[![Version](https://img.shields.io/badge/Version-1.0.2-blue.svg)](https://www.rust-lang.org)
+[![Version](https://img.shields.io/badge/Version-1.0.3-blue.svg)](https://www.rust-lang.org)
 
 Collaborative terminal sharing.
 

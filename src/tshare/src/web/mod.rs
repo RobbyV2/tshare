@@ -12,6 +12,10 @@ use serde::{Deserialize, Serialize};
 use tokio_tungstenite::{connect_async, tungstenite::Message as TungsteniteMessage};
 use tracing::{error, info};
 
+// Embed HTML templates at compile time
+const INDEX_HTML: &str = include_str!("../../../../public/index.html");
+const CONNECT_HTML: &str = include_str!("../../../../public/connect.html");
+
 #[derive(Clone)]
 struct AppState {
     tunnel_base: String,
@@ -117,41 +121,8 @@ pub async fn run_web_server(args: Args) -> Result<()> {
     Ok(())
 }
 
-async fn home_page() -> Result<Html<String>, StatusCode> {
-    // Read index page from file - try multiple possible locations
-    let possible_paths = [
-        "public/index.html",
-        "../public/index.html",
-        "../../public/index.html",
-        "/home/pi/Documents/tshare/public/index.html",
-    ];
-
-    let mut content = None;
-    let mut last_error = None;
-
-    for path in possible_paths {
-        match std::fs::read_to_string(path) {
-            Ok(html) => {
-                content = Some(html);
-                break;
-            }
-            Err(e) => {
-                last_error = Some((path, e));
-            }
-        }
-    }
-
-    let html = content.ok_or_else(|| {
-        if let Some((path, e)) = last_error {
-            error!(
-                "Failed to read index.html file (tried multiple paths, last was {}): {}",
-                path, e
-            );
-        }
-        StatusCode::INTERNAL_SERVER_ERROR
-    })?;
-
-    Ok(Html(html))
+async fn home_page() -> Html<String> {
+    Html(INDEX_HTML.to_string())
 }
 
 async fn session_page(
@@ -179,40 +150,7 @@ async fn session_page(
 
     let needs_auth = details.owner_password_hash.is_some() || details.guest_password_hash.is_some();
 
-    // Read template from file - try multiple possible locations
-    let possible_paths = [
-        "public/connect.html",
-        "../public/connect.html",
-        "../../public/connect.html",
-        "/home/pi/Documents/tshare/public/connect.html",
-    ];
-
-    let mut template = None;
-    let mut last_error = None;
-
-    for path in possible_paths {
-        match std::fs::read_to_string(path) {
-            Ok(content) => {
-                template = Some(content);
-                break;
-            }
-            Err(e) => {
-                last_error = Some((path, e));
-            }
-        }
-    }
-
-    let template = template.ok_or_else(|| {
-        if let Some((path, e)) = last_error {
-            error!(
-                "Failed to read template file (tried multiple paths, last was {}): {}",
-                path, e
-            );
-        }
-        StatusCode::INTERNAL_SERVER_ERROR
-    })?;
-
-    let html = template
+    let html = CONNECT_HTML
         .replace("{{ session_id }}", &session_id)
         .replace(
             "{{ modal_display }}",
