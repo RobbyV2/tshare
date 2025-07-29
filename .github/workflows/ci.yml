@@ -43,9 +43,37 @@ jobs:
       - name: Run tests
         run: just test
 
+      - name: Check documentation
+        run: just docs-check
+
+  docs:
+    name: Build Documentation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.88"
+
+      - name: Install just
+        uses: extractions/setup-just@v1
+
+      - name: Generate documentation
+        run: just docs
+
+      - name: Upload documentation
+        uses: actions/upload-artifact@v4
+        with:
+          name: tshare-docs
+          path: target/doc/
+          retention-days: 30
+          if-no-files-found: error
+
   build:
     name: Build Multi-Platform
-    needs: lint
+    needs: [lint, docs]
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -80,7 +108,7 @@ jobs:
 
   build-deb:
     name: Build Debian Package
-    needs: lint
+    needs: [lint, docs]
     runs-on: ubuntu-latest
     
     steps:
@@ -156,6 +184,17 @@ jobs:
           cp artifacts/deb/*.deb release/
           chmod +x release/tshare-linux-x64
 
+      - name: Get Previous Tag
+        id: prev_tag
+        run: |
+          PREV_TAG=$(git tag --sort=-version:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -2 | tail -1)
+          if [ -z "$PREV_TAG" ]; then
+            # If no previous tag, use first commit
+            PREV_TAG=$(git rev-list --max-parents=0 HEAD)
+          fi
+          echo "PREV_TAG=${PREV_TAG}" >> $GITHUB_ENV
+          echo "Previous tag: $PREV_TAG"
+
       - name: Create Release and Upload Assets
         uses: softprops/action-gh-release@v1
         env:
@@ -168,15 +207,15 @@ jobs:
             TShare - Terminal Sharing Made Simple
             
             ## What's New
-            - See the full changelog: https://github.com/${{ github.repository }}/compare/${{ env.TAG_NAME }}~1...${{ env.TAG_NAME }}
+            - See the full changelog: https://github.com/${{ github.repository }}/compare/${{ env.PREV_TAG }}...${{ env.TAG_NAME }}
             
             ## Installation
             
             ### Debian/Ubuntu
             ```bash
             # Download and install the .deb package
-            wget https://github.com/${{ github.repository }}/releases/download/${{ env.TAG_NAME }}/tshare_*.deb
-            sudo dpkg -i tshare_*.deb
+            wget https://github.com/${{ github.repository }}/releases/download/${{ env.TAG_NAME }}/tshare_${{ env.TAG_NAME }}.deb
+            sudo dpkg -i tshare_${{ env.TAG_NAME }}.deb
             ```
             
             ### Linux Binary

@@ -84,6 +84,7 @@ build:
 finalize:
     just format
     just lint
+    just docs-check
     just build
 
 # Build all binaries in debug mode
@@ -97,6 +98,18 @@ check:
 # Run tests
 test:
     cargo test --workspace
+
+# Generate documentation
+docs:
+    cargo doc --workspace --no-deps --document-private-items
+
+# Generate and open documentation
+docs-open:
+    cargo doc --workspace --no-deps --document-private-items --open
+
+# Check documentation builds without warnings
+docs-check:
+    RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --document-private-items
 
 # Install all binaries
 install:

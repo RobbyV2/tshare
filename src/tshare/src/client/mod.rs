@@ -1,3 +1,48 @@
+//! # TShare Client Module
+//!
+//! The client module handles terminal session creation and management. It creates
+//! a PTY (pseudo-terminal) that runs the user's shell and forwards all terminal
+//! I/O to the tunnel server via WebSocket connections.
+//!
+//! ## Key Features
+//!
+//! - **PTY Management**: Creates and manages pseudo-terminal sessions
+//! - **Bi-directional I/O**: Forwards terminal output to web viewers and input from web to terminal  
+//! - **Session Registration**: Registers sessions with the tunnel server
+//! - **Real-time Interaction**: Supports real-time terminal interaction from web clients
+//! - **Terminal Resizing**: Handles terminal resize events from web clients
+//! - **Clean Exit**: Proper cleanup of PTY and WebSocket resources
+//!
+//! ## Data Flow
+//!
+//! ```text
+//! ┌─────────────┐    stdin     ┌─────────────┐    WebSocket    ┌─────────────┐
+//! │   User      │─────────────►│   Client    │────────────────►│   Tunnel    │
+//! │   Terminal  │              │   (PTY)     │                 │   Server    │
+//! │             │◄─────────────│             │◄────────────────│             │
+//! └─────────────┘    stdout    └─────────────┘    WebSocket    └─────────────┘
+//!                                      │
+//!                                      ▼
+//!                              ┌─────────────┐
+//!                              │  Terminal   │
+//!                              │  History &  │
+//!                              │ Web Clients │
+//!                              └─────────────┘
+//! ```
+//!
+//! ## Example Usage
+//!
+//! ```bash
+//! # Basic session
+//! tshare connect
+//!
+//! # With custom servers  
+//! tshare connect --tunnel-host example.com --tunnel-port 8385
+//!
+//! # Password protected session
+//! tshare connect --owner-pass secret123 --guest-pass viewer --guest-readonly
+//! ```
+
 use anyhow::{Result, ensure};
 use clap::Parser;
 use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
@@ -11,6 +56,30 @@ use tokio::sync::mpsc;
 use tokio_tungstenite::{connect_async, tungstenite::Message};
 use tracing::{error, info};
 
+/// Command-line arguments for the TShare client
+///
+/// The client creates terminal sharing sessions by:
+/// 1. Registering a new session with the tunnel server
+/// 2. Creating a PTY with the user's shell
+/// 3. Forwarding terminal I/O between the PTY and tunnel server
+///
+/// # Examples
+///
+/// Basic usage with defaults:
+/// ```bash
+/// tshare connect
+/// ```
+///
+/// Custom server configuration:
+/// ```bash
+/// tshare connect --tunnel-host example.com --tunnel-port 8385 \
+///                --web-host example.com --web-port 8386
+/// ```
+///
+/// Password-protected session:
+/// ```bash
+/// tshare connect --owner-pass secret123 --guest-pass viewer --guest-readonly
+/// ```
 #[derive(Parser, Debug)]
 #[command(
     author,
@@ -18,51 +87,142 @@ use tracing::{error, info};
     about = "TShare client - connect and start a new terminal sharing session"
 )]
 pub struct Args {
-    /// Tunnel server host
+    /// Tunnel server host to connect to
+    ///
+    /// The tunnel server handles session coordination and data routing
+    /// between terminal clients and web viewers.
     #[arg(long, default_value = "127.0.0.1")]
     pub tunnel_host: String,
 
-    /// Tunnel server port
+    /// Tunnel server port to connect to
+    ///
+    /// Default port matches the tunnel server's default port.
     #[arg(long, default_value_t = 8385)]
     pub tunnel_port: u16,
 
-    /// Web server host
+    /// Web server host for the shareable link
+    ///
+    /// This is used to construct the shareable URL displayed to users.
+    /// Should match where your web server is accessible.
     #[arg(long, default_value = "127.0.0.1")]
     pub web_host: String,
 
-    /// Web server port
+    /// Web server port for the shareable link
+    ///
+    /// This is used to construct the shareable URL displayed to users.
+    /// Should match your web server's port.
     #[arg(long, default_value_t = 8386)]
     pub web_port: u16,
 
-    /// Set a password required for the session owner to connect via the web.
-    /// Owners always have full read/write access to the terminal.
+    /// Password required for session owners to connect via web
+    ///
+    /// Session owners have full read/write access to the terminal regardless
+    /// of other settings. If not provided, no authentication is required
+    /// and the first web user is granted owner privileges.
+    ///
+    /// # Security Note
+    /// Passwords are hashed using bcrypt before storage.
     #[arg(long)]
     pub owner_pass: Option<String>,
 
-    /// Set a password for guests to connect via the web.
-    /// Guests follow the readonly setting below.
+    /// Password for guests to connect via web
+    ///
+    /// Guest access permissions are controlled by the `guest_readonly` setting.
+    /// If both owner and guest passwords are unset, web users get owner privileges.
     #[arg(long)]
     pub guest_pass: Option<String>,
 
-    /// Make guest sessions read-only (no input from web is forwarded).
-    /// If true, guests can only view terminal output. If false, guests can interact.
-    /// Owners always have full access regardless of this setting.
+    /// Make guest sessions read-only
+    ///
+    /// When `true`, guests can view terminal output but cannot send input.
+    /// When `false`, guests can interact with the terminal just like owners.
+    /// This setting only applies to guest users; owners always have full access.
+    ///
+    /// # Default
+    /// `false` - guests can interact with the terminal by default
     #[arg(long, default_value_t = false)]
     pub guest_readonly: bool,
 }
 
+/// Request payload for creating a new terminal sharing session
+///
+/// This is sent to the tunnel server's `/api/session` endpoint to register
+/// a new session with the specified authentication and access control settings.
 #[derive(Serialize)]
 struct CreateSessionRequest {
+    /// Optional owner password (raw, will be hashed by server)
     owner_password: Option<String>,
+    /// Optional guest password (raw, will be hashed by server)  
     guest_password: Option<String>,
+    /// Whether guest users should have read-only access
     is_guest_readonly: bool,
 }
 
+/// Response from the tunnel server when creating a new session
+///
+/// Contains the unique session identifier that will be used in the shareable URL
+/// and for all subsequent WebSocket connections.
 #[derive(Deserialize)]
 struct CreateSessionResponse {
+    /// Unique session identifier (UUID format)
     session_id: String,
 }
 
+/// Creates and runs a terminal sharing session
+///
+/// This is the main entry point for the client functionality. It performs the following steps:
+///
+/// 1. **Server Validation**: Verifies connectivity to the tunnel server
+/// 2. **Session Registration**: Creates a new session with authentication settings
+/// 3. **PTY Creation**: Spawns a pseudo-terminal with the user's shell
+/// 4. **WebSocket Connection**: Establishes connection to tunnel server
+/// 5. **I/O Forwarding**: Bidirectional data flow between terminal and web clients
+/// 6. **Event Handling**: Manages terminal resizing, user input, and process lifecycle
+///
+/// # Arguments
+///
+/// * `args` - Configuration including server addresses, passwords, and permissions
+///
+/// # Returns
+///
+/// * `Result<()>` - Success or error result
+///
+/// # Example
+///
+/// ```rust,no_run
+/// use tshare::client::{Args, run_client};
+///
+/// # async fn example() -> anyhow::Result<()> {
+/// let args = Args {
+///     tunnel_host: "localhost".to_string(),
+///     tunnel_port: 8385,
+///     web_host: "localhost".to_string(),
+///     web_port: 8386,
+///     owner_pass: Some("secret123".to_string()),
+///     guest_pass: None,
+///     guest_readonly: false,
+/// };
+///
+/// run_client(args).await?;
+/// # Ok(())
+/// # }
+/// ```
+///
+/// # Behavior
+///
+/// The function will:
+/// - Display a shareable web link after successful session creation
+/// - Enable raw terminal mode for real-time character input
+/// - Forward all terminal I/O to connected web viewers
+/// - Handle terminal resize events from web clients
+/// - Clean up resources and exit when the terminal session ends
+///
+/// # Panics
+///
+/// Will panic if:
+/// - The tunnel server is unreachable
+/// - The tunnel server returns unexpected responses
+/// - Critical initialization steps fail
 pub async fn run_client(args: Args) -> Result<()> {
     let api_url = format!(
         "http://{}:{}/api/session",
@@ -364,6 +524,30 @@ pub async fn run_client(args: Args) -> Result<()> {
     std::process::exit(0);
 }
 
+/// Determines the user's preferred shell for the terminal session
+///
+/// Looks up the `SHELL` environment variable to determine which shell to use
+/// for the PTY session. Falls back to `/bin/bash` if the environment variable
+/// is not set or cannot be read.
+///
+/// # Returns
+///
+/// * `String` - Path to the shell executable
+///
+/// # Examples
+///
+/// ```rust,no_run
+/// # fn get_user_shell() -> String {
+/// #     std::env::var("SHELL").unwrap_or_else(|_| "/bin/bash".to_string())
+/// # }
+/// let shell = get_user_shell();
+/// // On most Unix systems: "/bin/bash", "/bin/zsh", "/bin/fish", etc.
+/// ```
+///
+/// # Platform Notes
+///
+/// - **Unix/Linux**: Uses `$SHELL` environment variable
+/// - **Fallback**: Defaults to `/bin/bash` which is widely available
 fn get_user_shell() -> String {
     std::env::var("SHELL").unwrap_or_else(|_| "/bin/bash".to_string())
 }

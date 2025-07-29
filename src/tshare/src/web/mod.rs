@@ -1,3 +1,70 @@
+//! # TShare Web Server Module
+//!
+//! The web server provides the browser-based interface for viewing and interacting
+//! with shared terminal sessions. It serves HTML/CSS/JavaScript assets and acts
+//! as a WebSocket proxy between web browsers and the tunnel server.
+//!
+//! ## Architecture
+//!
+//! ```text
+//! ┌─────────────┐    HTTP/WS     ┌─────────────┐    HTTP/WS     ┌─────────────┐
+//! │   Browser   │◄──────────────►│ Web Server  │◄──────────────►│   Tunnel    │
+//! │   Client    │                │             │                │   Server    │
+//! │             │                │ - HTML/CSS  │                │             │
+//! │ - Terminal  │                │ - Auth UI   │                │ - Sessions  │
+//! │ - Auth UI   │                │ - WS Proxy  │                │ - Auth      │
+//! │ - xterm.js  │                │             │                │ - Data      │
+//! └─────────────┘                └─────────────┘                └─────────────┘
+//! ```
+//!
+//! ## Key Features
+//!
+//! ### Static Content Serving
+//! - **HTML Templates**: Embedded terminal interface and connection pages
+//! - **Template Variables**: Dynamic session ID and authentication state injection
+//! - **No External Dependencies**: All assets embedded at compile time
+//!
+//! ### Authentication Interface
+//! - **Password Prompts**: Modal dialogs for owner/guest authentication
+//! - **Role Detection**: Automatic UI adaptation based on user permissions
+//! - **Session Validation**: Real-time verification with tunnel server
+//!
+//! ### WebSocket Proxying
+//! - **Transparent Proxy**: Forwards WebSocket connections to tunnel server
+//! - **Protocol Translation**: Handles message format differences between clients
+//! - **Connection Management**: Automatic reconnection and error handling
+//!
+//! ### REST API Proxy
+//! - **Session Details**: Fetches session info from tunnel server
+//! - **User Management**: Connected user listing and heartbeat forwarding
+//! - **Authentication**: Password verification against tunnel server
+//!
+//! ## Endpoints
+//!
+//! ### Pages
+//! - `GET /` - Home page
+//! - `GET /session/{id}` - Terminal session page
+//!
+//! ### API
+//! - `GET /api/session/{id}` - Get session details
+//! - `GET /api/session/{id}/users` - List connected users
+//! - `POST /api/session/{session_id}/heartbeat/{user_id}` - Send heartbeat
+//! - `GET /api/auth/{id}?password=...` - Authenticate with session
+//! - `POST /api/logout` - Logout from session
+//!
+//! ### WebSocket
+//! - `WS /ws/session/{id}?user_type={owner|guest}` - Terminal WebSocket proxy
+//!
+//! ## Example Usage
+//!
+//! ```bash
+//! # Start web server with defaults
+//! tshare web
+//!
+//! # Custom configuration
+//! tshare web --host 0.0.0.0 --port 8080 --tunnel-url http://tunnel.example.com:8385
+//! ```
+
 use anyhow::Result;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::{Path, Query, State};
@@ -59,6 +126,58 @@ pub struct Args {
     pub tunnel_url: String,
 }
 
+/// Starts the web server for serving terminal session interfaces
+///
+/// The web server provides the browser-based interface for viewing shared terminal
+/// sessions. It serves HTML/CSS/JavaScript assets and proxies connections to the
+/// tunnel server for real-time terminal interaction.
+///
+/// # Architecture
+///
+/// The server acts as a proxy/gateway between web browsers and the tunnel server:
+/// - **Static Assets**: Serves embedded HTML templates with terminal UI
+/// - **Authentication**: Handles password verification and user role management  
+/// - **WebSocket Proxy**: Forwards real-time terminal data between browser and tunnel server
+/// - **REST Proxy**: Proxies API calls for session management
+///
+/// # Arguments
+///
+/// * `args` - Server configuration including host, port, and tunnel server URL
+///
+/// # Returns
+///
+/// * `Result<()>` - Success or error result
+///
+/// # Example
+///
+/// ```rust,no_run
+/// use tshare::web::{Args, run_web_server};
+///
+/// # async fn example() -> anyhow::Result<()> {
+/// let args = Args {
+///     host: "0.0.0.0".to_string(),
+///     port: 8386,
+///     tunnel_url: "http://localhost:8385".to_string(),
+/// };
+///
+/// run_web_server(args).await?;
+/// # Ok(())
+/// # }
+/// ```
+///
+/// # Behavior
+///
+/// The server will:
+/// - Validate connectivity to the tunnel server on startup
+/// - Bind to the specified host and port
+/// - Serve HTML interfaces for terminal sessions
+/// - Handle authentication workflows
+/// - Proxy WebSocket connections for real-time terminal data
+/// - Forward REST API calls to the tunnel server
+///
+/// # Panics
+///
+/// Will panic if the tunnel server is unreachable during startup validation.
 pub async fn run_web_server(args: Args) -> Result<()> {
     // Validate connection to tunnel server before starting
     info!(
