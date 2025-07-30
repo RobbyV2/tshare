@@ -5,7 +5,6 @@
 [![Rust](https://img.shields.io/badge/rust-1.88-blue.svg)](https://www.rust-lang.org)
 [![GitHub](https://img.shields.io/github/stars/RobbyV2/tshare?style=social)](https://github.com/RobbyV2/tshare)
 
-
 Collaborative terminal sharing.
 
 ## Screenshots
@@ -22,6 +21,7 @@ Collaborative terminal sharing.
 - Rust (any recent version)
 
 Development dependencies:
+
 - just (`cargo install just`)
 - djlint (`pip install djlint`) for HTML formatting
 
@@ -37,12 +37,14 @@ cargo build --release
 ## Usage
 
 Start servers:
+
 ```bash
 tshare tunnel &
 tshare web &
 ```
 
 Share terminal:
+
 ```bash
 tshare connect
 ```
@@ -50,6 +52,7 @@ tshare connect
 ## Development
 
 See `justfile` for available commands:
+
 ```bash
 just --list
 ```
@@ -73,6 +76,7 @@ just build-deb      # Build .deb package
 All binaries accept `--help` for options. Default configuration works for local development.
 
 Production example:
+
 ```bash
 tshare tunnel --host 0.0.0.0
 tshare web --host 0.0.0.0 --tunnel-url http://tunnel.example.com:8385
